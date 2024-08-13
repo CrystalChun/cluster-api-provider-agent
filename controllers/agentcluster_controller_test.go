@@ -172,6 +172,17 @@ var _ = Describe("agentcluster reconcile", func() {
 		Expect(err).To(BeNil())
 		Expect(result).To(Equal(ctrl.Result{}))
 	})
+	It("paused agentCluster", func() {
+		agentCluster := newAgentCluster("agentCluster-1", testNamespace, capiproviderv1.AgentClusterSpec{})
+		agentCluster.Annotations = map[string]string{clusterv1.PausedAnnotation: "true"}
+		agentCluster.Status.ClusterDeploymentRef.Name = "nonexistent-clusterdeployment"
+		agentCluster.Status.ClusterDeploymentRef.Namespace = "nonexistent-namespace"
+		Expect(c.Create(ctx, agentCluster)).To(BeNil())
+
+		result, err := acr.Reconcile(ctx, newAgentClusterRequest(agentCluster))
+		Expect(err).To(BeNil())
+		Expect(result).To(Equal(ctrl.Result{}))
+	})
 	It("agentCluster ready status", func() {
 		agentCluster := createDefaultResources(ctx, c, clusterName, testNamespace, baseDomain, pullSecret, kubeconfig, kubeadminPassword)
 		agentCluster.Status.Ready = true

@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	capiv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	clusterutilv1 "sigs.k8s.io/cluster-api/util"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -82,6 +83,11 @@ func (r *AgentClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := r.Get(ctx, req.NamespacedName, agentCluster); err != nil {
 		log.WithError(err).Errorf("Failed to get agentCluster %s", req.NamespacedName)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if paused := agentCluster.Annotations[capiv1.PausedAnnotation]; paused == "true" {
+		log.Info("AgentCluster is paused")
+		return ctrl.Result{}, nil
 	}
 
 	// If the agentCluster has no reference to a ClusterDeployment, create one
