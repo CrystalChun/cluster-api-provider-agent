@@ -561,9 +561,12 @@ func (r *AgentMachineReconciler) updateStatus(ctx context.Context, log logrus.Fi
 		return getErr
 	}
 
-	if err = r.ensureAgentLabeled(ctx, agentMachine, agent); err != nil {
-		log.WithError(err).Errorf("failed to label Agent %s with AgentMachineRef", agent.Name)
-		return err
+	if agentMachine.DeletionTimestamp.IsZero() {
+		log.Infof("agent machine %s timestamp is zero %s, labelling agent %s", agentMachine.Name, agentMachine.DeletionTimestamp, agent.Name)
+		if err = r.ensureAgentLabeled(ctx, agentMachine, agent); err != nil {
+			log.WithError(err).Errorf("failed to label Agent %s with AgentMachineRef", agent.Name)
+			return err
+		}
 	}
 	setConditionByAgentCondition(agentMachine, agent, capiproviderv1.AgentSpecSyncedCondition, aiv1beta1.SpecSyncedCondition, clusterv1.ConditionSeverityError)
 	setConditionByAgentCondition(agentMachine, agent, capiproviderv1.AgentValidatedCondition, aiv1beta1.ValidatedCondition, clusterv1.ConditionSeverityError)
