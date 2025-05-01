@@ -290,11 +290,14 @@ func (r *AgentMachineReconciler) handleDeletionHook(ctx context.Context, log log
 		aimodels.HostStatusError,
 	}
 	if funk.Contains(removeHookStates, agent.Status.DebugInfo.State) {
+		log.Infof("CRYSTAL agentmachine deletiontimestamp before removing finalizer: %s", agentMachine.DeletionTimestamp)
 		log.Infof("Removing machine delete hook annotation for agent in status %s", agent.Status.DebugInfo.State)
 		if err := r.removeHookAndFinalizer(ctx, machine, agentMachine); err != nil {
 			log.Error(err)
 			return &ctrl.Result{}, err
 		}
+		log.Infof("CRYSTAL agentmachine deletiontimestamp after removing finalizer: %s", agentMachine.DeletionTimestamp)
+		return &ctrl.Result{}, nil
 	} else {
 		log.Infof("Waiting for agent %s to reboot into discovery", agent.Name)
 		return &ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -438,7 +441,7 @@ func (r *AgentMachineReconciler) updateFoundAgent(ctx context.Context, log logru
 		updated = true
 	}
 
-	if agent.Spec.ClusterDeploymentName != nil && (agent.Spec.ClusterDeploymentName.Name != clusterDeploymentRef.Name || agent.Spec.ClusterDeploymentName.Namespace != clusterDeploymentRef.Namespace) {
+	if agent.Spec.ClusterDeploymentName == nil || (agent.Spec.ClusterDeploymentName != nil && (agent.Spec.ClusterDeploymentName.Name != clusterDeploymentRef.Name || agent.Spec.ClusterDeploymentName.Namespace != clusterDeploymentRef.Namespace)) {
 		log.Infof("Agent missing clusterdeployment ref")
 		agent.Spec.ClusterDeploymentName = &aiv1beta1.ClusterReference{Namespace: clusterDeploymentRef.Namespace, Name: clusterDeploymentRef.Name}
 		updated = true
@@ -449,7 +452,7 @@ func (r *AgentMachineReconciler) updateFoundAgent(ctx context.Context, log logru
 		agent.Spec.MachineConfigPool = machineConfigPool
 		updated = true
 	}
-	if agent.Spec.IgnitionEndpointTokenReference != nil && (agent.Spec.IgnitionEndpointTokenReference.Name != ignitionTokenSecretRef.Name || agent.Spec.IgnitionEndpointTokenReference.Namespace != ignitionTokenSecretRef.Namespace) {
+	if agent.Spec.IgnitionEndpointTokenReference == nil || (agent.Spec.IgnitionEndpointTokenReference != nil && (agent.Spec.IgnitionEndpointTokenReference.Name != ignitionTokenSecretRef.Name || agent.Spec.IgnitionEndpointTokenReference.Namespace != ignitionTokenSecretRef.Namespace)) {
 		log.Infof("Agent missing ignition token secret ref")
 		agent.Spec.IgnitionEndpointTokenReference = ignitionTokenSecretRef
 		updated = true
