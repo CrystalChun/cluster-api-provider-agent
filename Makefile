@@ -44,7 +44,7 @@ AGENTS_NAMESPACE ?= ""
 ENVTEST_K8S_VERSION = 1.21
 
 # Runtime CLI to use for building and pushing images
-RUNTIME ?= docker
+RUNTIME ?= podman
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))

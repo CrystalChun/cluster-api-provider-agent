@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -119,7 +120,7 @@ func (r *AgentMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	if machine == nil {
 		log.Info("Waiting for Machine Controller to set OwnerRef on AgentMachine")
-		return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, nil)
+		return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, nil, "", nil, nil, err)
 	}
 
 	res, err := r.handleDeletionHook(ctx, log, agentMachine, machine)
@@ -150,7 +151,7 @@ func (r *AgentMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if agentCluster.Status.ClusterDeploymentRef.Name == "" {
 		err = fmt.Errorf("no cluster deployment reference on agentCluster %s", agentCluster.GetName())
 		log.Warning(err.Error())
-		return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, err)
+		return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, nil, "", nil, nil, err)
 	}
 
 	// If the AgentMachine doesn't have an agent, find one and set the agentRef
@@ -158,13 +159,13 @@ func (r *AgentMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		var foundAgent *aiv1beta1.Agent
 		foundAgent, err = r.findAgent(ctx, log, agentMachine, agentCluster.Status.ClusterDeploymentRef, machineConfigPool, ignitionTokenSecretRef, ignitionEndpointHTTPHeaders)
 		if foundAgent == nil || err != nil {
-			return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, err)
+			return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, nil, "", nil, nil, err)
 		}
 		r.updateAgentMachineWithFoundAgent(log, agentMachine, foundAgent)
 	}
 
 	// If the AgentMachine has an agent, check its conditions and update ready/error
-	return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, nil)
+	return ctrl.Result{}, r.updateStatus(ctx, log, agentMachine, &agentCluster.Status.ClusterDeploymentRef, machineConfigPool, ignitionTokenSecretRef, ignitionEndpointHTTPHeaders, nil)
 }
 
 func (r *AgentMachineReconciler) removeFinalizer(agentMachine *capiproviderv1.AgentMachine) error {
@@ -418,7 +419,7 @@ func (r *AgentMachineReconciler) updateFoundAgent(ctx context.Context, log logru
 	agentMachine *capiproviderv1.AgentMachine, agent *aiv1beta1.Agent,
 	clusterDeploymentRef capiproviderv1.ClusterDeploymentReference, machineConfigPool string,
 	ignitionTokenSecretRef *aiv1beta1.IgnitionEndpointTokenReference, ignitionEndpointHTTPHeaders map[string]string) error {
-
+	updated := false
 	log.Infof("Updating Agent %s/%s to be referenced by AgentMachine", agent.Namespace, agent.Name)
 	if agent.ObjectMeta.Labels == nil {
 		agent.ObjectMeta.Labels = make(map[string]string)
@@ -426,16 +427,46 @@ func (r *AgentMachineReconciler) updateFoundAgent(ctx context.Context, log logru
 	if agent.ObjectMeta.Annotations == nil {
 		agent.ObjectMeta.Annotations = make(map[string]string)
 	}
-	agent.ObjectMeta.Labels[AgentMachineRefLabelKey] = getAgentMachineRefLabel(agentMachine)
-	agent.ObjectMeta.Annotations[AgentMachineRefNamespace] = agentMachine.GetNamespace()
-	agent.Spec.ClusterDeploymentName = &aiv1beta1.ClusterReference{Namespace: clusterDeploymentRef.Namespace, Name: clusterDeploymentRef.Name}
-	agent.Spec.MachineConfigPool = machineConfigPool
-	agent.Spec.IgnitionEndpointTokenReference = ignitionTokenSecretRef
-	agent.Spec.IgnitionEndpointHTTPHeaders = ignitionEndpointHTTPHeaders
+	if ref := agent.ObjectMeta.Labels[AgentMachineRefLabelKey]; ref != getAgentMachineRefLabel(agentMachine) {
+		log.Infof("Agent missing agentmachine ref label")
+		agent.ObjectMeta.Labels[AgentMachineRefLabelKey] = getAgentMachineRefLabel(agentMachine)
+		updated = true
+	}
+	if ref := agent.ObjectMeta.Annotations[AgentMachineRefNamespace]; ref != agentMachine.GetNamespace() {
+		log.Infof("Agent missing agentmachine ref namespace annotation")
+		agent.ObjectMeta.Annotations[AgentMachineRefNamespace] = agentMachine.GetNamespace()
+		updated = true
+	}
 
-	if err := r.AgentClient.Update(ctx, agent); err != nil {
-		log.WithError(err).Errorf("failed to update found Agent %s", agent.Name)
-		return err
+	if agent.Spec.ClusterDeploymentName != nil && (agent.Spec.ClusterDeploymentName.Name != clusterDeploymentRef.Name || agent.Spec.ClusterDeploymentName.Namespace != clusterDeploymentRef.Namespace) {
+		log.Infof("Agent missing clusterdeployment ref")
+		agent.Spec.ClusterDeploymentName = &aiv1beta1.ClusterReference{Namespace: clusterDeploymentRef.Namespace, Name: clusterDeploymentRef.Name}
+		updated = true
+	}
+
+	if agent.Spec.MachineConfigPool != machineConfigPool {
+		log.Infof("Agent missing machineconfigpool")
+		agent.Spec.MachineConfigPool = machineConfigPool
+		updated = true
+	}
+	if agent.Spec.IgnitionEndpointTokenReference != nil && (agent.Spec.IgnitionEndpointTokenReference.Name != ignitionTokenSecretRef.Name || agent.Spec.IgnitionEndpointTokenReference.Namespace != ignitionTokenSecretRef.Namespace) {
+		log.Infof("Agent missing ignition token secret ref")
+		agent.Spec.IgnitionEndpointTokenReference = ignitionTokenSecretRef
+		updated = true
+	}
+
+	if !reflect.DeepEqual(agent.Spec.IgnitionEndpointHTTPHeaders, ignitionEndpointHTTPHeaders) {
+		log.Infof("Agent missing ignition http headers")
+		agent.Spec.IgnitionEndpointHTTPHeaders = ignitionEndpointHTTPHeaders
+		updated = true
+	}
+
+	if updated {
+		log.Infof("Agent %s updated with AgentMachine data", agent.Name)
+		if err := r.AgentClient.Update(ctx, agent); err != nil {
+			log.WithError(err).Errorf("failed to update found Agent %s", agent.Name)
+			return err
+		}
 	}
 	return nil
 }
@@ -544,7 +575,10 @@ func isValidAgent(agent *aiv1beta1.Agent) bool {
 	return agent.Spec.Approved && valid && connected && notBound
 }
 
-func (r *AgentMachineReconciler) updateStatus(ctx context.Context, log logrus.FieldLogger, agentMachine *capiproviderv1.AgentMachine, err error) error {
+func (r *AgentMachineReconciler) updateStatus(ctx context.Context, log logrus.FieldLogger,
+	agentMachine *capiproviderv1.AgentMachine, cdRef *capiproviderv1.ClusterDeploymentReference, mcp string,
+	ignitionTokenSecretRef *aiv1beta1.IgnitionEndpointTokenReference, ignitionEndpointHTTPHeaders map[string]string,
+	err error) error {
 	agentMachine.Status.Ready = false
 	conditionPassed := setAgentReservedCondition(agentMachine, err)
 	if !conditionPassed {
@@ -561,12 +595,17 @@ func (r *AgentMachineReconciler) updateStatus(ctx context.Context, log logrus.Fi
 		return getErr
 	}
 
-	if agentMachine.DeletionTimestamp.IsZero() {
+	if agentMachine.DeletionTimestamp.IsZero() && err == nil && cdRef != nil {
 		log.Infof("agent machine %s timestamp is zero %s, labelling agent %s", agentMachine.Name, agentMachine.DeletionTimestamp, agent.Name)
 		if err = r.ensureAgentLabeled(ctx, agentMachine, agent); err != nil {
 			log.WithError(err).Errorf("failed to label Agent %s with AgentMachineRef", agent.Name)
 			return err
 		}
+		if err = r.updateFoundAgent(ctx, log, agentMachine, agent, *cdRef, mcp, ignitionTokenSecretRef, ignitionEndpointHTTPHeaders); err != nil {
+			log.WithError(err).Errorf("failed to update Agent %s with data", agent.Name)
+			return err
+		}
+		log.Infof("Updated found agent in update status")
 	}
 	setConditionByAgentCondition(agentMachine, agent, capiproviderv1.AgentSpecSyncedCondition, aiv1beta1.SpecSyncedCondition, clusterv1.ConditionSeverityError)
 	setConditionByAgentCondition(agentMachine, agent, capiproviderv1.AgentValidatedCondition, aiv1beta1.ValidatedCondition, clusterv1.ConditionSeverityError)
