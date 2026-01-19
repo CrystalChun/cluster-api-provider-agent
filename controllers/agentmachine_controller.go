@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	ignitionapi "github.com/coreos/ignition/v2/config/v3_1/types"
+	ignitionapi "github.com/coreos/ignition/v2/config/v3_2/types"
 	"github.com/go-openapi/swag"
 	aiv1beta1 "github.com/openshift/assisted-service/api/v1beta1"
 	aimodels "github.com/openshift/assisted-service/models"
